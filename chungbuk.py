@@ -1,13 +1,11 @@
 # reinforcement_learning.py
 # -*- coding: utf-8 -*-
 """
-Modular Reinforcement Learning Script
-
+Enhanced Reinforcement Learning Script with Q/V Table Display
 Sections:
-1. Environment & Agent
-2. Depth-limited Action-value (Q) computation
-3. Depth-limited State-value (V) computation
-4. Policy extraction
+1. Environment & Agent\ n2. Q-value computation & display
+3. V-value computation & display
+4. Policy extraction & display
 5. Benchmarking V runtimes
 6. Visualization utilities
 """
@@ -35,21 +33,17 @@ class Environment:
         x, y = agent.pos
         dx, dy = agent.actions[action_idx]
         nx, ny = x + dx, y + dy
-        # terminal check
         if self.labels[x][y] == 'goal':
             return agent.pos.copy(), self.GOAL, True
-        # out-of-bounds
-        if nx<0 or nx>=self.rewards.shape[0] or ny<0 or ny>=self.rewards.shape[1]:
+        if not (0 <= nx < self.rewards.shape[0] and 0 <= ny < self.rewards.shape[1]):
             return agent.pos.copy(), self.CLIFF, True
-        # valid
-        agent.pos = np.array([nx,ny])
-        reward = self.rewards[nx,ny]
+        agent.pos = np.array([nx, ny])
+        reward = self.rewards[nx, ny]
         done = (self.labels[nx][ny] == 'goal')
         return agent.pos.copy(), reward, done
 
 class Agent:
-    """Holds position and available actions."""
-    actions = np.array([[-1,0],[0,1],[1,0],[0,-1]])  # up,right,down,left
+    actions = np.array([[-1,0], [0,1], [1,0], [0,-1]])  # up, right, down, left
     prob = np.full(4, 0.25)
 
     def __init__(self, start_pos):
@@ -58,10 +52,9 @@ class Agent:
     def reset(self, pos):
         self.pos = np.array(pos)
 
-# --- Action-value (Q) ---
+# --- Q-value computation ---
 def compute_q(env, agent, depth_limit, gamma=0.9):
     Q = np.zeros((*env.rewards.shape, len(agent.actions)))
-
     def q_val(pos, action, depth):
         agent.reset(pos)
         if env.labels[pos[0]][pos[1]] == 'goal':
@@ -69,10 +62,8 @@ def compute_q(env, agent, depth_limit, gamma=0.9):
         _, r, done = env.move(agent, action)
         if depth == depth_limit or done:
             return r
-        future = 0.0
-        next_pos = agent.pos.copy()
-        for a in range(len(agent.actions)):
-            future += agent.prob[a] * q_val(next_pos, a, depth+1)
+        future = sum(agent.prob[a] * q_val(agent.pos.copy(), a, depth+1)
+                     for a in range(len(agent.actions)))
         return r + gamma * future
 
     for i in range(env.rewards.shape[0]):
@@ -81,20 +72,16 @@ def compute_q(env, agent, depth_limit, gamma=0.9):
                 Q[i,j,a] = q_val((i,j), a, 0)
     return Q
 
-# --- State-value (V) ---
+# --- V-value computation ---
 def compute_v(env, agent, depth_limit, gamma=0.85):
     V = np.zeros(env.rewards.shape)
-
     def v_val(pos, depth):
         agent.reset(pos)
         if env.labels[pos[0]][pos[1]] == 'goal':
             return env.GOAL
         if depth == depth_limit:
-            val = 0.0
-            for a in range(len(agent.actions)):
-                _, r, _ = env.move(agent, a)
-                val += agent.prob[a] * r
-            return val
+            return sum(agent.prob[a] * env.rewards[tuple(agent.pos)]
+                       for a in range(len(agent.actions)))
         val = 0.0
         for a in range(len(agent.actions)):
             _, r, done = env.move(agent, a)
@@ -114,7 +101,7 @@ def compute_v(env, agent, depth_limit, gamma=0.85):
 def extract_policy(Q):
     return np.argmax(Q, axis=-1)
 
-# --- Benchmarking V ---
+# --- Benchmark V runtimes ---
 def benchmark_v(env, agent, depths):
     times = []
     for d in depths:
@@ -123,11 +110,31 @@ def benchmark_v(env, agent, depths):
         times.append(time.time() - start)
     return times
 
-# --- Visualization ---
-def show_policy(policy):
-    arrows = ['↑','→','↓','←']
-    for row in policy:
-        print(' '.join(arrows[a] for a in row))
+# --- Display utilities ---
+def show_q_table(Q):
+    rows, cols, _ = Q.shape
+    border = '+' + '-------+' * cols
+    for i in range(rows):
+        print(border)
+        for a in range(4):  # action rows
+            line = '|'
+            for j in range(cols):
+                val = Q[i,j,a]
+                line += f" {val:6.2f} |"
+            print(line)
+    print(border)
+
+
+def show_v_table(V):
+    rows, cols = V.shape
+    border = '+' + '-------+' * cols
+    print(border)
+    for i in range(rows):
+        line = '|'
+        for j in range(cols):
+            line += f" {V[i,j]:6.2f} |"
+        print(line)
+        print(border)
 
 # --- Main ---
 def main():
@@ -135,15 +142,34 @@ def main():
     agent = Agent((0,0))
     depths = list(range(8))
 
+    # Q-tables and policies
     for d in depths:
+        print(f"--- depth = {d} ---")
         Q = compute_q(env, agent, d)
-        print(f"Policy Q depth={d}")
-        show_policy(extract_policy(Q))
+        print("Q-table:")
+        show_q_table(Q)
+        print("Policy (arrows):")
+        for row in extract_policy(Q):
+            print(' '.join('↑→↓←'[a] for a in row))
+        print()
 
+    # V-value benchmarking and display
     times = benchmark_v(env, agent, depths)
+    for d, t in zip(depths, times):
+        print(f"depth={d}, time={t:.2f}s")
+    V = compute_v(env, agent, depths[-1])
+    print("V-table (depth={depths[-1]}):")
+    show_v_table(V)
+
+    # Reward table
+    print("Reward map:")
+    show_v_table(env.rewards)
+
+    # Plot benchmark
     plt.plot(depths, times, marker='o')
-    plt.xlabel('depth')
+    plt.xlabel('depth limit')
     plt.ylabel('time (s)')
+    plt.title('V computation runtime')
     plt.show()
 
 if __name__ == '__main__':
